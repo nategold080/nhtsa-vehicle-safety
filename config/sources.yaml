@@ -1,0 +1,90 @@
+# NHTSA Vehicle Safety Data Sources
+
+complaints_flat_file:
+  url: "https://static.nhtsa.gov/odi/ffdd/cmpl/FLAT_CMPL.zip"
+  description: "Flat file of all NHTSA vehicle owner complaints (1949-present)"
+  format: "zip -> tab-delimited text"
+  update_frequency: "daily"
+  estimated_records: 1500000
+
+complaints_api:
+  base_url: "https://api.nhtsa.gov/complaints/complaintsByVehicle"
+  params:
+    make: ""
+    model: ""
+    modelYear: ""
+  description: "Complaints by vehicle make/model/year"
+  format: "JSON"
+  rate_limit: "none specified, use 5 req/sec"
+
+recalls_api:
+  base_url: "https://api.nhtsa.gov/recalls/recallsByVehicle"
+  params:
+    make: ""
+    model: ""
+    modelYear: ""
+  description: "Recalls by vehicle make/model/year"
+  format: "JSON"
+
+recall_campaign_api:
+  base_url: "https://api.nhtsa.gov/recalls/campaignNumber"
+  params:
+    campaignNumber: ""
+  description: "Recall details by NHTSA campaign number"
+  format: "JSON"
+
+investigations_api:
+  base_url: "https://api.nhtsa.gov/investigations"
+  params:
+    make: ""
+    model: ""
+  description: "NHTSA defect investigations"
+  format: "JSON"
+
+investigations_flat_file:
+  url: "https://static.nhtsa.gov/odi/ffdd/inv/FLAT_INV.zip"
+  description: "Flat file of all NHTSA investigations"
+  format: "zip -> tab-delimited text"
+
+products_api:
+  makes_url: "https://api.nhtsa.gov/products/vehicle/makes"
+  models_url: "https://api.nhtsa.gov/products/vehicle/models"
+  params:
+    modelYear: ""
+    make: ""
+    issueType: "c"  # c=complaints, r=recalls
+  description: "Lists makes/models with complaints or recalls for a given year"
+  format: "JSON"
+
+vpic_api:
+  base_url: "https://vpic.nhtsa.dot.gov/api/vehicles"
+  makes_url: "https://vpic.nhtsa.dot.gov/api/vehicles/GetAllMakes?format=json"
+  description: "Vehicle Product Information Catalog — full make/model database"
+  format: "JSON"
+
+# Component taxonomy from NHTSA
+component_categories:
+  - "AIR BAGS"
+  - "BACK OVER PREVENTION"
+  - "ELECTRICAL SYSTEM"
+  - "ENGINE"
+  - "ENGINE AND ENGINE COOLING"
+  - "EQUIPMENT"
+  - "FORWARD COLLISION AVOIDANCE"
+  - "FUEL SYSTEM"
+  - "HYBRID PROPULSION SYSTEM"
+  - "INTERIOR LIGHTING"
+  - "LANE DEPARTURE"
+  - "PARKING BRAKE"
+  - "POWER TRAIN"
+  - "SERVICE BRAKES"
+  - "SEATS"
+  - "SPEED CONTROL"
+  - "STEERING"
+  - "STRUCTURE"
+  - "SUSPENSION"
+  - "TIRES"
+  - "TRAILER HITCHES"
+  - "VISIBILITY"
+  - "WHEELS"
+  - "WHEELS:LUGS/NUTS/BOLTS/STUDS"
