@@ -119,6 +119,129 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
             ON cross_links(source_type, source_id);
         CREATE INDEX IF NOT EXISTS idx_cross_links_target
             ON cross_links(target_type, target_id);
+
+        -- Manufacturer risk profiles (Enrichment 1)
+        CREATE TABLE IF NOT EXISTS manufacturer_profiles (
+            profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            manufacturer_name TEXT NOT NULL UNIQUE,
+            years_active_start INTEGER,
+            years_active_end INTEGER,
+            total_complaints INTEGER DEFAULT 0,
+            total_recalls INTEGER DEFAULT 0,
+            total_investigations INTEGER DEFAULT 0,
+            total_vehicles_affected INTEGER DEFAULT 0,
+            unique_models INTEGER DEFAULT 0,
+            total_deaths INTEGER DEFAULT 0,
+            total_injuries INTEGER DEFAULT 0,
+            total_fires INTEGER DEFAULT 0,
+            total_crashes INTEGER DEFAULT 0,
+            death_rate REAL,
+            injury_rate REAL,
+            fire_rate REAL,
+            crash_rate REAL,
+            severity_index REAL,
+            avg_days_to_recall REAL,
+            median_days_to_recall REAL,
+            investigation_to_recall_rate REAL,
+            complaint_trend TEXT,
+            severity_trend TEXT,
+            risk_score REAL,
+            risk_tier TEXT,
+            quality_score REAL,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS manufacturer_yearly_metrics (
+            manufacturer_name TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            complaint_count INTEGER DEFAULT 0,
+            recall_count INTEGER DEFAULT 0,
+            investigation_count INTEGER DEFAULT 0,
+            death_count INTEGER DEFAULT 0,
+            injury_count INTEGER DEFAULT 0,
+            fire_count INTEGER DEFAULT 0,
+            crash_count INTEGER DEFAULT 0,
+            severity_index REAL,
+            PRIMARY KEY (manufacturer_name, year)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_mfr_profile_name
+            ON manufacturer_profiles(manufacturer_name);
+        CREATE INDEX IF NOT EXISTS idx_mfr_profile_risk
+            ON manufacturer_profiles(risk_tier);
+        CREATE INDEX IF NOT EXISTS idx_mfr_profile_score
+            ON manufacturer_profiles(risk_score);
+        CREATE INDEX IF NOT EXISTS idx_mfr_yearly_name
+            ON manufacturer_yearly_metrics(manufacturer_name);
+        CREATE INDEX IF NOT EXISTS idx_mfr_yearly_year
+            ON manufacturer_yearly_metrics(year);
+
+        -- Vehicle attributes (Enrichment 2)
+        CREATE TABLE IF NOT EXISTS vehicle_attributes (
+            vehicle_id INTEGER PRIMARY KEY,
+            make TEXT NOT NULL,
+            model TEXT NOT NULL,
+            model_year INTEGER,
+            body_class TEXT,
+            drive_type TEXT,
+            fuel_type TEXT,
+            engine_displacement_l REAL,
+            engine_cylinders INTEGER,
+            engine_configuration TEXT,
+            transmission_type TEXT,
+            gvwr_class TEXT,
+            plant_country TEXT,
+            plant_state TEXT,
+            electrification_level TEXT,
+            quality_score REAL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_vattr_make ON vehicle_attributes(make);
+        CREATE INDEX IF NOT EXISTS idx_vattr_body ON vehicle_attributes(body_class);
+        CREATE INDEX IF NOT EXISTS idx_vattr_fuel ON vehicle_attributes(fuel_type);
+        CREATE INDEX IF NOT EXISTS idx_vattr_electric ON vehicle_attributes(electrification_level);
+
+        -- Investigation dockets (Enrichment 3)
+        CREATE TABLE IF NOT EXISTS investigation_dockets (
+            docket_id TEXT PRIMARY KEY,
+            investigation_number TEXT NOT NULL,
+            docket_type TEXT,
+            title TEXT,
+            agency TEXT DEFAULT 'NHTSA',
+            document_count INTEGER DEFAULT 0,
+            last_modified TEXT,
+            quality_score REAL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE IF NOT EXISTS investigation_documents (
+            document_id TEXT PRIMARY KEY,
+            docket_id TEXT NOT NULL,
+            investigation_number TEXT,
+            document_type TEXT,
+            title TEXT,
+            posted_date TEXT,
+            author TEXT,
+            summary TEXT,
+            determination TEXT,
+            affected_population TEXT,
+            source_url TEXT,
+            quality_score REAL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_docket_investigation
+            ON investigation_dockets(investigation_number);
+        CREATE INDEX IF NOT EXISTS idx_doc_docket
+            ON investigation_documents(docket_id);
+        CREATE INDEX IF NOT EXISTS idx_doc_investigation
+            ON investigation_documents(investigation_number);
+        CREATE INDEX IF NOT EXISTS idx_doc_type
+            ON investigation_documents(document_type);
+        CREATE INDEX IF NOT EXISTS idx_doc_determination
+            ON investigation_documents(determination);
     """)
     _conn.commit()
     if conn is None:
@@ -220,6 +343,51 @@ def upsert_vehicle(conn: sqlite3.Connection, make: str, model: str,
         (make, model, make_norm, model_norm),
     )
     return cur.lastrowid
+
+
+def upsert_vehicle_attributes(conn: sqlite3.Connection, attrs: dict) -> int | None:
+    """Insert or update vehicle attributes."""
+    # Look up vehicle_id from vehicles table
+    make_norm = attrs["make"].upper()
+    model_norm = attrs["model"].upper()
+    row = conn.execute(
+        "SELECT id FROM vehicles WHERE make_normalized = ? AND model_normalized = ?",
+        (make_norm, model_norm),
+    ).fetchone()
+    if not row:
+        return None
+
+    vehicle_id = row["id"]
+    conn.execute("""
+        INSERT OR REPLACE INTO vehicle_attributes (
+            vehicle_id, make, model, model_year, body_class, drive_type,
+            fuel_type, engine_displacement_l, engine_cylinders,
+            engine_configuration, transmission_type, gvwr_class,
+            plant_country, plant_state, electrification_level, quality_score
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        vehicle_id, attrs["make"], attrs["model"], attrs.get("model_year"),
+        attrs.get("body_class"), attrs.get("drive_type"),
+        attrs.get("fuel_type"), attrs.get("engine_displacement_l"),
+        attrs.get("engine_cylinders"), attrs.get("engine_configuration"),
+        attrs.get("transmission_type"), attrs.get("gvwr_class"),
+        attrs.get("plant_country"), attrs.get("plant_state"),
+        attrs.get("electrification_level"),
+        _score_vehicle_attributes(attrs),
+    ))
+    return vehicle_id
+
+
+def _score_vehicle_attributes(attrs: dict) -> float:
+    """Quality score for vehicle attributes."""
+    checks = {
+        "has_body_class": 0.25 if attrs.get("body_class") else 0.0,
+        "has_fuel_type": 0.25 if attrs.get("fuel_type") else 0.0,
+        "has_electrification": 0.20 if attrs.get("electrification_level") else 0.0,
+        "has_drive_type": 0.15 if attrs.get("drive_type") else 0.0,
+        "has_engine": 0.15 if attrs.get("engine_cylinders") or attrs.get("engine_displacement_l") else 0.0,
+    }
+    return round(sum(checks.values()), 3)
 
 
 def get_stats(conn: sqlite3.Connection | None = None) -> dict:
